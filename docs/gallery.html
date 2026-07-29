@@ -116,8 +116,13 @@ document.getElementById('title').textContent = CFG.eventTitle + ' — Gallery';
 document.title = CFG.eventTitle + ' — Gallery';
 
 // The access key travels in the shared link and sticks in localStorage.
-const KEY = new URLSearchParams(location.search).get('k') || localStorage.getItem('pc_key') || '';
-if (new URLSearchParams(location.search).get('k')) localStorage.setItem('pc_key', KEY);
+// localStorage can throw in strict/private browsing — degrade to URL-only.
+let storedKey = null;
+try { storedKey = localStorage.getItem('pc_key'); } catch (e) { /* ignore */ }
+const KEY = new URLSearchParams(location.search).get('k') || storedKey || '';
+if (new URLSearchParams(location.search).get('k')) {
+  try { localStorage.setItem('pc_key', KEY); } catch (e) { /* session-only */ }
+}
 
 const contentEl = document.getElementById('content');
 const sortEl = document.getElementById('sortBy');

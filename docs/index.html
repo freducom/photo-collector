@@ -54,18 +54,19 @@
     <button data-lang="fi" aria-label="Suomi">🇫🇮</button>
     <button data-lang="en" aria-label="English">🇬🇧</button>
   </div>
-  <h1 id="title">Photo Collection</h1>
-  <p class="sub" id="sub"></p>
+  <!-- Static Swedish defaults so the page is readable even if JS dies -->
+  <h1 id="title">Bilder av Birk</h1>
+  <p class="sub" id="sub">Dela dina bästa bilder — originalen sparas i full kvalitet.</p>
 
-  <div class="warn" id="noKey" hidden></div>
+  <div class="warn" id="noKey" hidden>Den här sidan behöver den personliga länk du fått. Öppna länken igen.</div>
 
   <div class="card">
-    <label for="name" id="nameLabel"></label>
-    <input type="text" id="name" autocomplete="name" maxlength="80">
+    <label for="name" id="nameLabel">Ditt namn</label>
+    <input type="text" id="name" placeholder="t.ex. Maria K." autocomplete="name" maxlength="80">
     <input type="text" id="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <button class="pick" id="pickBtn"></button>
+    <button class="pick" id="pickBtn">📷 Välj bilder</button>
     <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple>
-    <p class="hint" id="hint"></p>
+    <p class="hint" id="hint">Du kan välja många på en gång. Håll sidan öppen tills uppladdningen är klar.</p>
   </div>
 
   <div class="card" id="queueCard" hidden>
@@ -143,7 +144,7 @@ const I18N = {
     errUpload: c => `upload failed (${c})`,
   },
 };
-let LANG = localStorage.getItem('pc_lang') || 'sv';
+let LANG = store.get('pc_lang') || 'sv';
 if (!I18N[LANG]) LANG = 'sv';
 const t = (key, ...args) => {
   const v = I18N[LANG][key];
@@ -165,24 +166,36 @@ function applyLang() {
 
 document.querySelectorAll('.langs button').forEach(b => b.addEventListener('click', () => {
   LANG = b.dataset.lang;
-  localStorage.setItem('pc_lang', LANG);
+  store.set('pc_lang', LANG);
   applyLang();
 }));
 
+// localStorage can throw in strict/private browsing modes — never let that
+// take the whole page down.
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* session-only */ } },
+};
+const genUuid = () => crypto.randomUUID ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+    });
+
 // The access key travels in the shared link and sticks in localStorage.
-const KEY = new URLSearchParams(location.search).get('k') || localStorage.getItem('pc_key') || '';
-if (new URLSearchParams(location.search).get('k')) localStorage.setItem('pc_key', KEY);
+const KEY = new URLSearchParams(location.search).get('k') || store.get('pc_key') || '';
+if (new URLSearchParams(location.search).get('k')) store.set('pc_key', KEY);
 
 // Per-device identity, so two guests with the same name stay separate.
-let UID = localStorage.getItem('pc_uid');
+let UID = store.get('pc_uid');
 if (!UID) {
-  UID = crypto.randomUUID();
-  localStorage.setItem('pc_uid', UID);
+  UID = genUuid();
+  store.set('pc_uid', UID);
 }
 
 const nameEl = document.getElementById('name');
-nameEl.value = localStorage.getItem('pc_name') || '';
-nameEl.addEventListener('input', () => localStorage.setItem('pc_name', nameEl.value.trim()));
+nameEl.value = store.get('pc_name') || '';
+nameEl.addEventListener('input', () => store.set('pc_name', nameEl.value.trim()));
 
 const pickBtn = document.getElementById('pickBtn');
 const fileInput = document.getElementById('fileInput');
