@@ -45,6 +45,10 @@ const CFG = window.PC_CONFIG;
 document.getElementById('title').textContent = CFG.eventTitle + ' — Gallery';
 document.title = CFG.eventTitle + ' — Gallery';
 
+// The access key travels in the shared link and sticks in localStorage.
+const KEY = new URLSearchParams(location.search).get('k') || localStorage.getItem('pc_key') || '';
+if (new URLSearchParams(location.search).get('k')) localStorage.setItem('pc_key', KEY);
+
 const contentEl = document.getElementById('content');
 const sortEl = document.getElementById('sortBy');
 const whoEl = document.getElementById('who');
@@ -54,8 +58,9 @@ let photos = [];
 const publicUrl = p => `${CFG.supabaseUrl}/storage/v1/object/public/photos/${p}`;
 
 async function load() {
+  if (!KEY) { contentEl.innerHTML = '<p class="empty">This page needs the personal link you were sent.</p>'; return; }
   const res = await fetch(`${CFG.supabaseUrl}/rest/v1/photos?select=*&order=taken_at.desc.nullslast&limit=5000`, {
-    headers: { apikey: CFG.anonKey, Authorization: `Bearer ${CFG.anonKey}` },
+    headers: { apikey: CFG.anonKey, Authorization: `Bearer ${CFG.anonKey}`, 'x-collect-key': KEY },
   });
   if (!res.ok) { contentEl.innerHTML = `<p class="empty">Failed to load: ${res.status}</p>`; return; }
   photos = await res.json();

@@ -6,10 +6,15 @@ cd "$(dirname "$0")"
 
 SUPABASE_URL=$(grep -o "supabaseUrl: '[^']*'" docs/config.js | cut -d"'" -f2)
 ANON_KEY=$(grep -o "anonKey: '[^']*'" docs/config.js | cut -d"'" -f2)
+COLLECT_KEY="${COLLECT_KEY:-${1:-}}"
+if [ -z "$COLLECT_KEY" ]; then
+  echo "Usage: ./download-all.sh <access-key>   (the k=... value from the shared link)" >&2
+  exit 1
+fi
 OUT=downloads
 
 curl -sf "$SUPABASE_URL/rest/v1/photos?select=uploader,storage_path,original_name,taken_at&limit=5000" \
-  -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" |
+  -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" -H "x-collect-key: $COLLECT_KEY" |
 SUPABASE_URL="$SUPABASE_URL" OUT="$OUT" python3 -c '
 import json, sys, os, re, urllib.request
 

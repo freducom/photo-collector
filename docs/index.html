@@ -15,12 +15,14 @@
   label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
   input[type=text] { width: 100%; font-size: 1.1rem; padding: 12px; border: 1.5px solid #d1d5db; border-radius: 10px; }
   input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .hp { position: absolute; left: -9999px; top: -9999px; }
   .pick { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 18px; margin-top: 16px;
           font-size: 1.15rem; font-weight: 600; color: #fff; background: var(--accent); border: none; border-radius: 12px; cursor: pointer; }
   .pick:disabled { background: #9ca3af; }
   .pick:active { transform: scale(0.99); }
   #fileInput { display: none; }
   .hint { color: var(--muted); font-size: 0.82rem; margin-top: 10px; text-align: center; }
+  .warn { background: #fef3c7; border-radius: 10px; padding: 12px; font-size: 0.9rem; margin-bottom: 16px; }
   #queue { list-style: none; }
   #queue li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eee; font-size: 0.9rem; }
   #queue li:last-child { border-bottom: none; }
@@ -41,9 +43,12 @@
   <h1 id="title">Photo Collection</h1>
   <p class="sub">Share your best shots — originals are kept at full quality.</p>
 
+  <div class="warn" id="noKey" hidden>This page needs the personal link you were sent. Please open the exact link again.</div>
+
   <div class="card">
     <label for="name">Your name</label>
     <input type="text" id="name" placeholder="e.g. Maria K." autocomplete="name" maxlength="80">
+    <input type="text" id="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
     <button class="pick" id="pickBtn">📷 Choose photos</button>
     <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple>
     <p class="hint">You can select many at once. Keep this page open until uploads finish.</p>
@@ -62,6 +67,10 @@ const CFG = window.PC_CONFIG;
 document.getElementById('title').textContent = CFG.eventTitle;
 document.title = CFG.eventTitle;
 
+// The access key travels in the shared link and sticks in localStorage.
+const KEY = new URLSearchParams(location.search).get('k') || localStorage.getItem('pc_key') || '';
+if (new URLSearchParams(location.search).get('k')) localStorage.setItem('pc_key', KEY);
+
 const nameEl = document.getElementById('name');
 nameEl.value = localStorage.getItem('pc_name') || '';
 nameEl.addEventListener('input', () => localStorage.setItem('pc_name', nameEl.value.trim()));
@@ -71,6 +80,12 @@ const fileInput = document.getElementById('fileInput');
 const queueEl = document.getElementById('queue');
 const queueCard = document.getElementById('queueCard');
 const summaryEl = document.getElementById('summary');
+const honeypotEl = document.getElementById('website');
+
+if (!KEY) {
+  document.getElementById('noKey').hidden = false;
+  pickBtn.disabled = true;
+}
 
 pickBtn.addEventListener('click', () => {
   if (!nameEl.value.trim()) {
@@ -154,68 +169,67 @@ async function makeThumb(file, previewImg) {
   }
 }
 
-async function storagePut(path, blob, contentType) {
-  const res = await fetch(`${CFG.supabaseUrl}/storage/v1/object/photos/${path}`, {
+async function gate(route, payload) {
+  const res = await fetch(`${CFG.gateUrl}/${route}`, {
     method: 'POST',
-    headers: {
-      apikey: CFG.anonKey,
-      Authorization: `Bearer ${CFG.anonKey}`,
-      'Content-Type': contentType || 'application/octet-stream',
-      'x-upsert': 'false',
-    },
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ k: KEY, honeypot: honeypotEl.value, ...payload }),
+  });
+  if (!res.ok) {
+    const msg = res.status === 429 ? 'too many uploads right now — try later'
+              : res.status === 413 ? 'file too large (max 50 MB)'
+              : res.status === 507 ? 'the collection is full'
+              : `upload not allowed (${res.status})`;
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+async function putSigned(url, blob, contentType) {
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType || 'application/octet-stream' },
     body: blob,
   });
-  if (!res.ok) throw new Error(`storage ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`upload failed (${res.status})`);
 }
 
 async function uploadOne(item) {
   setStatus(item, '<span class="spinner"></span> uploading');
   try {
     const { file } = item;
-    const id = crypto.randomUUID();
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-    const storagePath = `originals/${id}.${ext}`;
+    const contentType = file.type || 'image/jpeg';
 
-    const [takenAt, thumb] = await Promise.all([
+    const [takenAt, thumb, signed] = await Promise.all([
       extractTakenAt(file),
       makeThumb(file, item.li.querySelector('img')),
+      gate('sign', { name: item.uploader, fileName: file.name, size: file.size, contentType }),
     ]);
 
-    await storagePut(storagePath, file, file.type);
+    await putSigned(signed.uploadUrl, file, contentType);
 
     let thumbPath = null;
     if (thumb) {
-      thumbPath = `thumbs/${id}.jpg`;
-      try { await storagePut(thumbPath, thumb, 'image/jpeg'); }
-      catch (e) { thumbPath = null; } // thumbnail is best-effort
+      try { await putSigned(signed.thumbUploadUrl, thumb, 'image/jpeg'); thumbPath = signed.thumbPath; }
+      catch (e) { /* thumbnail is best-effort */ }
     }
 
-    const res = await fetch(`${CFG.supabaseUrl}/rest/v1/photos`, {
-      method: 'POST',
-      headers: {
-        apikey: CFG.anonKey,
-        Authorization: `Bearer ${CFG.anonKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify({
-        uploader: item.uploader,
-        storage_path: storagePath,
-        thumb_path: thumbPath,
-        original_name: file.name,
-        content_type: file.type || null,
-        size_bytes: file.size,
-        taken_at: takenAt,
-      }),
+    await gate('commit', {
+      name: item.uploader,
+      storagePath: signed.storagePath,
+      thumbPath,
+      originalName: file.name,
+      contentType,
+      size: file.size,
+      takenAt,
     });
-    if (!res.ok) throw new Error(`db ${res.status}: ${await res.text()}`);
 
     item.state = 'done';
     setStatus(item, '✓ done', 'done');
   } catch (e) {
     console.error(e);
     item.state = 'error';
-    setStatus(item, 'failed ', 'error');
+    setStatus(item, (e.message || 'failed') + ' ', 'error');
     const retry = document.createElement('button');
     retry.className = 'retry';
     retry.textContent = 'retry';
