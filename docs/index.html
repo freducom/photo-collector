@@ -80,9 +80,16 @@ document.title = CFG.eventTitle;
 const KEY = new URLSearchParams(location.search).get('k') || localStorage.getItem('pc_key') || '';
 if (new URLSearchParams(location.search).get('k')) localStorage.setItem('pc_key', KEY);
 
+// Per-device identity, so two guests with the same name stay separate.
+let UID = localStorage.getItem('pc_uid');
+if (!UID) {
+  UID = crypto.randomUUID();
+  localStorage.setItem('pc_uid', UID);
+}
+
 const nameEl = document.getElementById('name');
 nameEl.value = localStorage.getItem('pc_name') || '';
-nameEl.addEventListener('input', () => { localStorage.setItem('pc_name', nameEl.value.trim()); refreshMineSoon(); });
+nameEl.addEventListener('input', () => localStorage.setItem('pc_name', nameEl.value.trim()));
 
 const pickBtn = document.getElementById('pickBtn');
 const fileInput = document.getElementById('fileInput');
@@ -225,6 +232,7 @@ async function uploadOne(item) {
 
     await gate('commit', {
       name: item.uploader,
+      uploaderId: UID,
       storagePath: signed.storagePath,
       thumbPath,
       originalName: file.name,
@@ -248,18 +256,17 @@ async function uploadOne(item) {
   }
 }
 
-// "You've already shared N photos" — looked up by the saved name, so it
-// survives reopening the page on the same device.
+// "You've already shared N photos" — looked up by this device's UID, so two
+// guests with the same name never see each other's photos here.
 const mineCard = document.getElementById('mineCard');
 const mineTitle = document.getElementById('mineTitle');
 const mineGrid = document.getElementById('mineGrid');
 
 async function refreshMine() {
-  const name = nameEl.value.trim();
-  if (!KEY || !name) { mineCard.hidden = true; return; }
+  if (!KEY) { mineCard.hidden = true; return; }
   try {
     const res = await fetch(
-      `${CFG.supabaseUrl}/rest/v1/photos?select=storage_path,thumb_path&uploader=eq.${encodeURIComponent(name)}&order=uploaded_at.desc&limit=500`,
+      `${CFG.supabaseUrl}/rest/v1/photos?select=storage_path,thumb_path&uploader_id=eq.${UID}&order=uploaded_at.desc&limit=500`,
       { headers: { apikey: CFG.anonKey, Authorization: `Bearer ${CFG.anonKey}`, 'x-collect-key': KEY } });
     if (!res.ok) return;
     const rows = await res.json();

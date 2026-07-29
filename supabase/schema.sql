@@ -5,6 +5,7 @@
 create table public.photos (
   id uuid primary key default gen_random_uuid(),
   uploader text not null check (char_length(uploader) between 1 and 80),
+  uploader_id uuid, -- per-device identity from the browser's localStorage
   storage_path text not null,
   thumb_path text,
   original_name text,
