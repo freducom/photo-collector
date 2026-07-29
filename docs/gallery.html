@@ -39,6 +39,18 @@
           color: #e5e7eb; font-size: 0.9rem; background: linear-gradient(transparent, rgba(0,0,0,.7)); }
   #mBar a { color: #93c5fd; }
   #mCount { position: absolute; top: 16px; left: 16px; color: #9ca3af; font-size: 0.85rem; }
+  /* slideshow */
+  #slideshow { position: fixed; inset: 0; background: #000; z-index: 70; cursor: none; }
+  #slideshow[hidden] { display: none; }
+  #slideshow img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+                   opacity: 0; transition: opacity 1.2s ease; }
+  #slideshow img.on { opacity: 1; }
+  #ssCap { position: absolute; bottom: 22px; left: 0; right: 0; text-align: center; z-index: 2;
+           color: rgba(255,255,255,.75); font-size: 1rem; text-shadow: 0 1px 6px #000; }
+  #ssExit { position: absolute; top: 14px; right: 16px; z-index: 2; width: 44px; height: 44px;
+            border: none; border-radius: 50%; background: rgba(255,255,255,.15); color: #fff;
+            font-size: 1.2rem; cursor: pointer; opacity: .35; }
+  #ssExit:hover { opacity: 1; }
   /* share dialog */
   #share { position: fixed; inset: 0; background: rgba(10,10,12,.55); z-index: 60;
            display: flex; align-items: center; justify-content: center; padding: 16px; }
@@ -76,9 +88,16 @@
     <!-- hidden for now, fully functional — remove `hidden` to expose -->
     <button class="btn" id="dlAll" hidden>⬇ Download all</button>
     <button class="btn" id="shareBtn">📤 Share</button>
+    <button class="btn" id="ssBtn">▶ Slideshow</button>
     <span class="count" id="count"></span>
   </div>
   <div id="content"><p class="empty">Loading…</p></div>
+</div>
+
+<div id="slideshow" hidden>
+  <img id="ssImgA" alt=""><img id="ssImgB" alt="">
+  <div id="ssCap"></div>
+  <button id="ssExit" aria-label="Exit slideshow">✕</button>
 </div>
 
 <div id="share" hidden>
@@ -361,6 +380,71 @@ async function downloadAll() {
     dlBtn.disabled = false;
   }
 }
+
+// --- slideshow (fullscreen, auto-advance with crossfade) ---
+const ss = document.getElementById('slideshow');
+const ssImgs = [document.getElementById('ssImgA'), document.getElementById('ssImgB')];
+const ssCap = document.getElementById('ssCap');
+const SS_INTERVAL = 5000;
+let ssFront = 0, ssIdx = 0, ssTimer = null;
+
+function ssShow(i) {
+  const p = viewList[i];
+  if (!p) return;
+  const back = ssImgs[1 - ssFront];
+  const url = publicUrl(p.thumb_path || p.storage_path);
+  const pre = new Image();
+  pre.onload = () => {
+    back.src = url;
+    back.classList.add('on');
+    ssImgs[ssFront].classList.remove('on');
+    ssFront = 1 - ssFront;
+    ssCap.textContent = `${p.uploader} · ${fmt(p.taken_at)}`;
+  };
+  pre.onerror = () => { ssCap.textContent = `${p.uploader} · ${fmt(p.taken_at)} (no preview)`; };
+  pre.src = url;
+}
+
+function ssStep(d) {
+  ssIdx = (ssIdx + d + viewList.length) % viewList.length;
+  ssShow(ssIdx);
+  clearInterval(ssTimer);
+  ssTimer = setInterval(() => ssStep(1), SS_INTERVAL);
+}
+
+function startSlideshow() {
+  if (!viewList.length) { alert('No photos to show.'); return; }
+  ssIdx = !modal.hidden ? modalIdx : 0;
+  closeModal();
+  ss.hidden = false;
+  document.body.style.overflow = 'hidden';
+  const rf = ss.requestFullscreen || ss.webkitRequestFullscreen;
+  if (rf) { try { rf.call(ss).catch(() => {}); } catch (e) { /* overlay fallback */ } }
+  ssShow(ssIdx);
+  ssTimer = setInterval(() => ssStep(1), SS_INTERVAL);
+}
+
+function stopSlideshow() {
+  if (ss.hidden) return;
+  clearInterval(ssTimer);
+  ssTimer = null;
+  ss.hidden = true;
+  document.body.style.overflow = '';
+  ssImgs.forEach(img => { img.classList.remove('on'); img.removeAttribute('src'); });
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+document.getElementById('ssBtn').addEventListener('click', startSlideshow);
+document.getElementById('ssExit').addEventListener('click', stopSlideshow);
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) stopSlideshow(); // Esc in fullscreen lands here
+});
+document.addEventListener('keydown', (e) => {
+  if (ss.hidden) return;
+  if (e.key === 'Escape') stopSlideshow();
+  else if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); ssStep(1); }
+  else if (e.key === 'ArrowLeft') ssStep(-1);
+});
 
 // --- share dialog ---
 const shareEl = document.getElementById('share');
