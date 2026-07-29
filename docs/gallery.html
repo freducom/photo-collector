@@ -13,6 +13,7 @@
   h1 { font-size: 1.4rem; margin-bottom: 16px; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; align-items: center; }
   select, .btn { font-size: 0.9rem; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }
+  .chk { font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
   .count { color: var(--muted); font-size: 0.9rem; margin-left: auto; }
   .group-title { font-weight: 700; margin: 22px 0 10px; font-size: 1.05rem; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
@@ -89,6 +90,7 @@
     <button class="btn" id="dlAll" hidden>⬇ Download all</button>
     <button class="btn" id="shareBtn">📤 Share</button>
     <button class="btn" id="ssBtn">▶ Slideshow</button>
+    <label class="chk"><input type="checkbox" id="hideWa"> hide 💬 re-shares</label>
     <span class="count" id="count"></span>
   </div>
   <div id="content"><p class="empty">Loading…</p></div>
@@ -193,7 +195,7 @@ function tile(p) {
     : `<div class="noThumb">${p.original_name || 'photo'}<br>(no preview)</div>`;
   const meta = document.createElement('div');
   meta.className = 'meta';
-  meta.textContent = `${p.uploader} · ${fmt(p.taken_at)}`;
+  meta.textContent = `${p.suspected_reshare ? '💬 ' : ''}${p.uploader} · ${fmt(p.taken_at)}`;
   a.appendChild(meta);
   return a;
 }
@@ -203,6 +205,7 @@ function render() {
   viewList = [];
   const who = whoEl.value;
   let list = who ? photos.filter(p => p.uploader === who) : [...photos];
+  if (document.getElementById('hideWa').checked) list = list.filter(p => !p.suspected_reshare);
   countEl.textContent = `${list.length} photo${list.length === 1 ? '' : 's'}`;
   contentEl.innerHTML = '';
   if (!list.length) { contentEl.innerHTML = '<p class="empty">No photos yet.</p>'; return; }
@@ -487,6 +490,7 @@ nativeShareBtn.addEventListener('click', () => {
 
 sortEl.addEventListener('change', render);
 whoEl.addEventListener('change', render);
+document.getElementById('hideWa').addEventListener('change', render);
 load();
 </script>
 </body>

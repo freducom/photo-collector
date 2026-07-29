@@ -70,6 +70,7 @@
   </div>
 
   <div class="card" id="queueCard" hidden>
+    <div class="warn" id="waWarn" hidden></div>
     <ul id="queue"></ul>
     <p id="summary"></p>
   </div>
@@ -118,6 +119,7 @@ const I18N = {
     errFull: 'samlingen är full',
     errNotAllowed: c => `uppladdning nekad (${c})`,
     errUpload: c => `uppladdningen misslyckades (${c})`,
+    waWarn: 'Bilder märkta med 💬 verkar komma från WhatsApp eller sociala medier — originalkvalitet, datum och plats saknas. Ladda gärna upp originalen från kamerarullen om du har dem.',
   },
   fi: {
     sub: 'Jaa parhaat kuvasi — alkuperäiset säilyvät täydessä laadussa.',
@@ -136,6 +138,7 @@ const I18N = {
     errFull: 'kokoelma on täynnä',
     errNotAllowed: c => `lataus estetty (${c})`,
     errUpload: c => `lataus epäonnistui (${c})`,
+    waWarn: 'Merkillä 💬 merkityt kuvat näyttävät tulevan WhatsAppista tai somesta — alkuperäinen laatu, päiväys ja sijainti puuttuvat. Lataa alkuperäiset kuvarullasta, jos mahdollista.',
   },
   en: {
     sub: 'Share your best shots — originals are kept at full quality.',
@@ -154,6 +157,7 @@ const I18N = {
     errFull: 'the collection is full',
     errNotAllowed: c => `upload not allowed (${c})`,
     errUpload: c => `upload failed (${c})`,
+    waWarn: 'Photos marked 💬 look like WhatsApp/social-media copies — original quality, date and location are missing. If you have the originals in your camera roll, please upload those.',
   },
 };
 let LANG = store.get('pc_lang') || 'sv';
@@ -267,18 +271,21 @@ function updateSummary() {
     : t('progress', done, queue.length) + (failed ? t('failedCount', failed) : '');
 }
 
-async function extractTakenAt(file) {
+async function readMeta(file) {
+  let tags = null;
   try {
-    const tags = await exifr.parse(file, ['DateTimeOriginal', 'CreateDate']);
-    const d = tags?.DateTimeOriginal || tags?.CreateDate;
-    if (d instanceof Date && !isNaN(d)) return d.toISOString();
-  } catch (e) { /* no EXIF — fall through */ }
-  return file.lastModified ? new Date(file.lastModified).toISOString() : null;
+    tags = await exifr.parse(file, ['DateTimeOriginal', 'CreateDate', 'Make', 'Model', 'GPSLatitude']);
+  } catch (e) { /* unreadable EXIF — treated as absent */ }
+  const d = tags?.DateTimeOriginal || tags?.CreateDate;
+  const takenAt = (d instanceof Date && !isNaN(d)) ? d.toISOString()
+    : (file.lastModified ? new Date(file.lastModified).toISOString() : null);
+  return { tags, takenAt };
 }
 
 async function makeThumb(file, previewImg) {
   try {
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const dims = { w: bmp.width, h: bmp.height };
     const scale = Math.min(1, 1000 / Math.max(bmp.width, bmp.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(bmp.width * scale);
@@ -287,10 +294,26 @@ async function makeThumb(file, previewImg) {
     bmp.close();
     const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.8));
     if (blob && previewImg) previewImg.src = URL.createObjectURL(blob);
-    return blob;
+    return { blob, dims };
   } catch (e) {
-    return null; // e.g. HEIC on a browser that can't decode it — original still uploads
+    return { blob: null, dims: null }; // e.g. HEIC on a browser that can't decode it
   }
+}
+
+// WhatsApp (and most social apps) strip all EXIF, downscale to ≤1600px and
+// recompress hard. Filename is the strongest signal; the rest combined is a
+// good heuristic. PNGs (screenshots) are deliberately not flagged.
+const WA_NAME_RE = /(^|[\\/])IMG-\d{8}-WA\d{3,}|WhatsApp (Image|Video)/i;
+
+function detectReshare(file, tags, dims) {
+  if (WA_NAME_RE.test(file.name)) return true;
+  const hasExif = tags && (tags.DateTimeOriginal || tags.CreateDate || tags.Make || tags.Model || tags.GPSLatitude);
+  if (hasExif) return false;
+  if (!/^image\/jpe?g$/i.test(file.type)) return false;
+  if (!dims) return false;
+  const longEdge = Math.max(dims.w, dims.h);
+  const bytesPerPixel = file.size / (dims.w * dims.h);
+  return longEdge <= 1700 && bytesPerPixel < 0.25;
 }
 
 async function gate(route, payload) {
@@ -324,17 +347,25 @@ async function uploadOne(item) {
     const { file } = item;
     const contentType = file.type || 'image/jpeg';
 
-    const [takenAt, thumb, signed] = await Promise.all([
-      extractTakenAt(file),
+    const [meta, thumb, signed] = await Promise.all([
+      readMeta(file),
       makeThumb(file, item.li.querySelector('img')),
       gate('sign', { name: item.uploader, fileName: file.name, size: file.size, contentType }),
     ]);
 
+    const reshare = detectReshare(file, meta.tags, thumb.dims);
+    if (reshare) {
+      item.li.querySelector('.fname').textContent = '💬 ' + file.name;
+      const warn = document.getElementById('waWarn');
+      warn.textContent = t('waWarn');
+      warn.hidden = false;
+    }
+
     await putSigned(signed.uploadUrl, file, contentType);
 
     let thumbPath = null;
-    if (thumb) {
-      try { await putSigned(signed.thumbUploadUrl, thumb, 'image/jpeg'); thumbPath = signed.thumbPath; }
+    if (thumb.blob) {
+      try { await putSigned(signed.thumbUploadUrl, thumb.blob, 'image/jpeg'); thumbPath = signed.thumbPath; }
       catch (e) { /* thumbnail is best-effort */ }
     }
 
@@ -346,7 +377,8 @@ async function uploadOne(item) {
       originalName: file.name,
       contentType,
       size: file.size,
-      takenAt,
+      takenAt: meta.takenAt,
+      suspectedReshare: reshare,
     });
 
     item.state = 'done';
