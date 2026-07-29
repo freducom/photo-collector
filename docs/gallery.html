@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gallery</title>
+<style>
+  :root { --accent: #2563eb; --bg: #f4f5f7; --text: #1a1d21; --muted: #6b7280; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.4rem; margin-bottom: 16px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; align-items: center; }
+  select, .btn { font-size: 0.9rem; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }
+  .count { color: var(--muted); font-size: 0.9rem; margin-left: auto; }
+  .group-title { font-weight: 700; margin: 22px 0 10px; font-size: 1.05rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .tile { position: relative; display: block; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: #e5e7eb; }
+  .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile .noThumb { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 0.8rem; padding: 8px; text-align: center; }
+  .meta { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 8px 6px; font-size: 0.72rem; color: #fff;
+          background: linear-gradient(transparent, rgba(0,0,0,.65)); }
+  .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Gallery</h1>
+  <div class="controls">
+    <select id="sortBy">
+      <option value="taken_desc">Date taken ↓ (newest first)</option>
+      <option value="taken_asc">Date taken ↑ (oldest first)</option>
+      <option value="uploaded_desc">Upload time ↓</option>
+      <option value="uploader">Group by uploader</option>
+    </select>
+    <select id="who"><option value="">Everyone</option></select>
+    <span class="count" id="count"></span>
+  </div>
+  <div id="content"><p class="empty">Loading…</p></div>
+</div>
+
+<script src="./config.js"></script>
+<script>
+const CFG = window.PC_CONFIG;
+document.getElementById('title').textContent = CFG.eventTitle + ' — Gallery';
+document.title = CFG.eventTitle + ' — Gallery';
+
+const contentEl = document.getElementById('content');
+const sortEl = document.getElementById('sortBy');
+const whoEl = document.getElementById('who');
+const countEl = document.getElementById('count');
+let photos = [];
+
+const publicUrl = p => `${CFG.supabaseUrl}/storage/v1/object/public/photos/${p}`;
+
+async function load() {
+  const res = await fetch(`${CFG.supabaseUrl}/rest/v1/photos?select=*&order=taken_at.desc.nullslast&limit=5000`, {
+    headers: { apikey: CFG.anonKey, Authorization: `Bearer ${CFG.anonKey}` },
+  });
+  if (!res.ok) { contentEl.innerHTML = `<p class="empty">Failed to load: ${res.status}</p>`; return; }
+  photos = await res.json();
+
+  const uploaders = [...new Set(photos.map(p => p.uploader))].sort((a, b) => a.localeCompare(b));
+  for (const u of uploaders) {
+    const opt = document.createElement('option');
+    opt.value = u; opt.textContent = u;
+    whoEl.appendChild(opt);
+  }
+  render();
+}
+
+const fmt = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'unknown date';
+const fmtDay = iso => iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: 'full' }) : 'Unknown date';
+
+function tile(p) {
+  const a = document.createElement('a');
+  a.className = 'tile';
+  a.href = publicUrl(p.storage_path);
+  a.target = '_blank';
+  a.title = `${p.uploader} — ${fmt(p.taken_at)} — ${p.original_name || ''}`;
+  a.innerHTML = p.thumb_path
+    ? `<img loading="lazy" src="${publicUrl(p.thumb_path)}" alt="">`
+    : `<div class="noThumb">${p.original_name || 'photo'}<br>(no preview)</div>`;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = `${p.uploader} · ${fmt(p.taken_at)}`;
+  a.appendChild(meta);
+  return a;
+}
+
+function render() {
+  const who = whoEl.value;
+  let list = who ? photos.filter(p => p.uploader === who) : [...photos];
+  countEl.textContent = `${list.length} photo${list.length === 1 ? '' : 's'}`;
+  contentEl.innerHTML = '';
+  if (!list.length) { contentEl.innerHTML = '<p class="empty">No photos yet.</p>'; return; }
+
+  const sort = sortEl.value;
+  const byTaken = (a, b) => (a.taken_at || '') < (b.taken_at || '') ? -1 : 1;
+
+  if (sort === 'uploader') {
+    list.sort(byTaken);
+    const groups = new Map();
+    for (const p of list) {
+      if (!groups.has(p.uploader)) groups.set(p.uploader, []);
+      groups.get(p.uploader).push(p);
+    }
+    for (const [name, ps] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const h = document.createElement('div');
+      h.className = 'group-title';
+      h.textContent = `${name} (${ps.length})`;
+      contentEl.appendChild(h);
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      ps.forEach(p => grid.appendChild(tile(p)));
+      contentEl.appendChild(grid);
+    }
+    return;
+  }
+
+  if (sort === 'taken_asc') list.sort(byTaken);
+  else if (sort === 'taken_desc') list.sort((a, b) => byTaken(b, a));
+  else list.sort((a, b) => (a.uploaded_at < b.uploaded_at ? 1 : -1));
+
+  // group by day for date sorts
+  const groups = new Map();
+  for (const p of list) {
+    const key = p.taken_at ? p.taken_at.slice(0, 10) : 'unknown';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  if (sort.startsWith('taken')) {
+    for (const [, ps] of groups) {
+      const h = document.createElement('div');
+      h.className = 'group-title';
+      h.textContent = fmtDay(ps[0].taken_at);
+      contentEl.appendChild(h);
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      ps.forEach(p => grid.appendChild(tile(p)));
+      contentEl.appendChild(grid);
+    }
+  } else {
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    list.forEach(p => grid.appendChild(tile(p)));
+    contentEl.appendChild(grid);
+  }
+}
+
+sortEl.addEventListener('change', render);
+whoEl.addEventListener('change', render);
+load();
+</script>
+</body>
+</html>

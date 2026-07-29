@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upload photos</title>
+<style>
+  :root { --accent: #2563eb; --bg: #f4f5f7; --card: #fff; --text: #1a1d21; --muted: #6b7280; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin-bottom: 24px; }
+  .card { background: var(--card); border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
+  label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
+  input[type=text] { width: 100%; font-size: 1.1rem; padding: 12px; border: 1.5px solid #d1d5db; border-radius: 10px; }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .pick { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 18px; margin-top: 16px;
+          font-size: 1.15rem; font-weight: 600; color: #fff; background: var(--accent); border: none; border-radius: 12px; cursor: pointer; }
+  .pick:disabled { background: #9ca3af; }
+  .pick:active { transform: scale(0.99); }
+  #fileInput { display: none; }
+  .hint { color: var(--muted); font-size: 0.82rem; margin-top: 10px; text-align: center; }
+  #queue { list-style: none; }
+  #queue li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+  #queue li:last-child { border-bottom: none; }
+  #queue img { width: 46px; height: 46px; object-fit: cover; border-radius: 8px; background: #e5e7eb; flex-shrink: 0; }
+  .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status { font-size: 0.82rem; color: var(--muted); flex-shrink: 0; }
+  .status.done { color: #16a34a; font-weight: 600; }
+  .status.error { color: #dc2626; font-weight: 600; }
+  .retry { color: var(--accent); background: none; border: none; font-size: 0.82rem; cursor: pointer; padding: 0; text-decoration: underline; }
+  #summary { text-align: center; font-weight: 600; margin-top: 8px; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #d1d5db; border-top-color: var(--accent);
+             border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Photo Collection</h1>
+  <p class="sub">Share your best shots — originals are kept at full quality.</p>
+
+  <div class="card">
+    <label for="name">Your name</label>
+    <input type="text" id="name" placeholder="e.g. Maria K." autocomplete="name" maxlength="80">
+    <button class="pick" id="pickBtn">📷 Choose photos</button>
+    <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple>
+    <p class="hint">You can select many at once. Keep this page open until uploads finish.</p>
+  </div>
+
+  <div class="card" id="queueCard" hidden>
+    <ul id="queue"></ul>
+    <p id="summary"></p>
+  </div>
+</div>
+
+<script src="./exifr.umd.js"></script>
+<script src="./config.js"></script>
+<script>
+const CFG = window.PC_CONFIG;
+document.getElementById('title').textContent = CFG.eventTitle;
+document.title = CFG.eventTitle;
+
+const nameEl = document.getElementById('name');
+nameEl.value = localStorage.getItem('pc_name') || '';
+nameEl.addEventListener('input', () => localStorage.setItem('pc_name', nameEl.value.trim()));
+
+const pickBtn = document.getElementById('pickBtn');
+const fileInput = document.getElementById('fileInput');
+const queueEl = document.getElementById('queue');
+const queueCard = document.getElementById('queueCard');
+const summaryEl = document.getElementById('summary');
+
+pickBtn.addEventListener('click', () => {
+  if (!nameEl.value.trim()) {
+    nameEl.focus();
+    nameEl.style.borderColor = '#dc2626';
+    setTimeout(() => nameEl.style.borderColor = '', 1500);
+    return;
+  }
+  fileInput.click();
+});
+
+fileInput.addEventListener('change', () => {
+  const files = [...fileInput.files];
+  fileInput.value = '';
+  files.forEach(enqueue);
+});
+
+const queue = [];
+let active = 0;
+const MAX_CONCURRENT = 3;
+
+function enqueue(file) {
+  queueCard.hidden = false;
+  const li = document.createElement('li');
+  li.innerHTML = `<img alt=""><span class="fname"></span><span class="status">waiting</span>`;
+  li.querySelector('.fname').textContent = file.name;
+  queueEl.prepend(li);
+  const item = { file, li, uploader: nameEl.value.trim(), state: 'waiting' };
+  queue.push(item);
+  pump();
+}
+
+function setStatus(item, text, cls) {
+  const el = item.li.querySelector('.status');
+  el.className = 'status' + (cls ? ' ' + cls : '');
+  el.innerHTML = text;
+}
+
+function pump() {
+  while (active < MAX_CONCURRENT) {
+    const item = queue.find(i => i.state === 'waiting');
+    if (!item) break;
+    item.state = 'uploading';
+    active++;
+    uploadOne(item).finally(() => { active--; pump(); updateSummary(); });
+  }
+  updateSummary();
+}
+
+function updateSummary() {
+  const done = queue.filter(i => i.state === 'done').length;
+  const failed = queue.filter(i => i.state === 'error').length;
+  summaryEl.textContent = done === queue.length
+    ? `All ${done} photo${done === 1 ? '' : 's'} uploaded — thank you! 🎉`
+    : `${done}/${queue.length} uploaded` + (failed ? `, ${failed} failed` : '');
+}
+
+async function extractTakenAt(file) {
+  try {
+    const tags = await exifr.parse(file, ['DateTimeOriginal', 'CreateDate']);
+    const d = tags?.DateTimeOriginal || tags?.CreateDate;
+    if (d instanceof Date && !isNaN(d)) return d.toISOString();
+  } catch (e) { /* no EXIF — fall through */ }
+  return file.lastModified ? new Date(file.lastModified).toISOString() : null;
+}
+
+async function makeThumb(file, previewImg) {
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, 1000 / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close();
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.8));
+    if (blob && previewImg) previewImg.src = URL.createObjectURL(blob);
+    return blob;
+  } catch (e) {
+    return null; // e.g. HEIC on a browser that can't decode it — original still uploads
+  }
+}
+
+async function storagePut(path, blob, contentType) {
+  const res = await fetch(`${CFG.supabaseUrl}/storage/v1/object/photos/${path}`, {
+    method: 'POST',
+    headers: {
+      apikey: CFG.anonKey,
+      Authorization: `Bearer ${CFG.anonKey}`,
+      'Content-Type': contentType || 'application/octet-stream',
+      'x-upsert': 'false',
+    },
+    body: blob,
+  });
+  if (!res.ok) throw new Error(`storage ${res.status}: ${await res.text()}`);
+}
+
+async function uploadOne(item) {
+  setStatus(item, '<span class="spinner"></span> uploading');
+  try {
+    const { file } = item;
+    const id = crypto.randomUUID();
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const storagePath = `originals/${id}.${ext}`;
+
+    const [takenAt, thumb] = await Promise.all([
+      extractTakenAt(file),
+      makeThumb(file, item.li.querySelector('img')),
+    ]);
+
+    await storagePut(storagePath, file, file.type);
+
+    let thumbPath = null;
+    if (thumb) {
+      thumbPath = `thumbs/${id}.jpg`;
+      try { await storagePut(thumbPath, thumb, 'image/jpeg'); }
+      catch (e) { thumbPath = null; } // thumbnail is best-effort
+    }
+
+    const res = await fetch(`${CFG.supabaseUrl}/rest/v1/photos`, {
+      method: 'POST',
+      headers: {
+        apikey: CFG.anonKey,
+        Authorization: `Bearer ${CFG.anonKey}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        uploader: item.uploader,
+        storage_path: storagePath,
+        thumb_path: thumbPath,
+        original_name: file.name,
+        content_type: file.type || null,
+        size_bytes: file.size,
+        taken_at: takenAt,
+      }),
+    });
+    if (!res.ok) throw new Error(`db ${res.status}: ${await res.text()}`);
+
+    item.state = 'done';
+    setStatus(item, '✓ done', 'done');
+  } catch (e) {
+    console.error(e);
+    item.state = 'error';
+    setStatus(item, 'failed ', 'error');
+    const retry = document.createElement('button');
+    retry.className = 'retry';
+    retry.textContent = 'retry';
+    retry.onclick = () => { retry.remove(); item.state = 'waiting'; pump(); };
+    item.li.querySelector('.status').appendChild(retry);
+  }
+}
+
+window.addEventListener('beforeunload', (e) => {
+  if (queue.some(i => i.state === 'waiting' || i.state === 'uploading')) e.preventDefault();
+});
+</script>
+</body>
+</html>
