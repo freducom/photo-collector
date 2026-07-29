@@ -33,7 +33,7 @@
   #modal { position: fixed; inset: 0; background: rgba(10,10,12,.93); z-index: 50;
            display: flex; align-items: center; justify-content: center; }
   #modal[hidden] { display: none; }
-  #modalImg { max-width: 94vw; max-height: 82vh; object-fit: contain; border-radius: 6px;
+  #modalImg, #modalVid { max-width: 94vw; max-height: 82vh; object-fit: contain; border-radius: 6px;
               box-shadow: 0 8px 40px rgba(0,0,0,.6); user-select: none; }
   .mBtn { position: absolute; top: 50%; transform: translateY(-50%); width: 54px; height: 84px;
           border: none; border-radius: 12px; background: rgba(255,255,255,.09); color: #fff;
@@ -132,6 +132,7 @@
 <div id="modal" hidden>
   <span id="mCount"></span>
   <img id="modalImg" alt="">
+  <video id="modalVid" controls playsinline hidden></video>
   <button class="mBtn" id="mPrev" aria-label="Previous">‹</button>
   <button class="mBtn" id="mNext" aria-label="Next">›</button>
   <button id="mClose" aria-label="Close">✕</button>
@@ -212,7 +213,7 @@ function tile(p) {
     + '<span class="selMark">✓</span>';
   const meta = document.createElement('div');
   meta.className = 'meta';
-  meta.textContent = `${p.suspected_reshare ? '💬 ' : ''}${p.uploader} · ${fmt(p.taken_at)}`;
+  meta.textContent = `${(p.content_type || '').startsWith('video/') ? '🎬 ' : ''}${p.suspected_reshare ? '💬 ' : ''}${p.uploader} · ${fmt(p.taken_at)}`;
   a.appendChild(meta);
   return a;
 }
@@ -297,18 +298,36 @@ function openModal(i) {
   showCurrent();
 }
 
+const modalVid = document.getElementById('modalVid');
+const isVideoPhoto = p => (p.content_type || '').startsWith('video/');
+
 function closeModal() {
   if (modal.hidden) return;
   modal.hidden = true;
   document.body.style.overflow = '';
   modalImg.src = '';
+  modalVid.pause();
+  modalVid.removeAttribute('src');
+  modalVid.load();
 }
 
 function showCurrent() {
   const p = viewList[modalIdx];
   if (!p) return;
-  modalImg.src = publicUrl(p.thumb_path || p.storage_path);
-  mCap.textContent = `${p.uploader} · ${fmt(p.taken_at)}`;
+  const video = isVideoPhoto(p);
+  modalImg.hidden = video;
+  modalVid.hidden = !video;
+  if (video) {
+    modalImg.src = '';
+    modalVid.src = publicUrl(p.storage_path);
+    modalVid.poster = p.thumb_path ? publicUrl(p.thumb_path) : '';
+  } else {
+    modalVid.pause();
+    modalVid.removeAttribute('src');
+    modalVid.load();
+    modalImg.src = publicUrl(p.thumb_path || p.storage_path);
+  }
+  mCap.textContent = `${video ? '🎬 ' : ''}${p.uploader} · ${fmt(p.taken_at)}`;
   mOrig.href = publicUrl(p.storage_path);
   mCount.textContent = `${modalIdx + 1} / ${viewList.length}`;
   for (const d of [1, -1]) { // preload neighbours for instant stepping

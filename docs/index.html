@@ -64,8 +64,8 @@
     <label for="name" id="nameLabel">Ditt namn</label>
     <input type="text" id="name" placeholder="t.ex. Maria K." autocomplete="name" maxlength="80">
     <input type="text" id="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <button class="pick" id="pickBtn">📷 Välj bilder</button>
-    <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple>
+    <button class="pick" id="pickBtn">📷 Välj bilder & videor</button>
+    <input type="file" id="fileInput" accept="image/*,.heic,.heif,video/*,.mov,.mp4" multiple>
     <p class="hint" id="hint">Du kan välja många på en gång. Håll sidan öppen tills uppladdningen är klar.</p>
   </div>
 
@@ -107,7 +107,7 @@ const I18N = {
     noKey: 'Den här sidan behöver den personliga länk du fått. Öppna länken igen.',
     nameLabel: 'Ditt namn',
     namePh: 't.ex. Maria K.',
-    pick: '📷 Välj bilder',
+    pick: '📷 Välj bilder & videor',
     hint: 'Du kan välja många på en gång. Håll sidan öppen tills uppladdningen är klar.',
     waiting: 'väntar', uploading: 'laddar upp', done: '✓ klar', retry: 'försök igen',
     allDone: n => n === 1 ? '1 bild uppladdad — tack! 🎉' : `Alla ${n} bilder uppladdade — tack! 🎉`,
@@ -115,7 +115,7 @@ const I18N = {
     failedCount: n => `, ${n} misslyckades`,
     mine: n => n === 1 ? 'Du har redan delat 1 bild 💙' : `Du har redan delat ${n} bilder 💙`,
     errTooMany: 'för många uppladdningar just nu — försök senare',
-    errTooBig: 'filen är för stor (max 50 MB)',
+    errTooBig: 'filen är för stor',
     errFull: 'samlingen är full',
     errNotAllowed: c => `uppladdning nekad (${c})`,
     errUpload: c => `uppladdningen misslyckades (${c})`,
@@ -126,7 +126,7 @@ const I18N = {
     noKey: 'Tämä sivu tarvitsee saamasi henkilökohtaisen linkin. Avaa linkki uudelleen.',
     nameLabel: 'Nimesi',
     namePh: 'esim. Maria K.',
-    pick: '📷 Valitse kuvat',
+    pick: '📷 Valitse kuvat ja videot',
     hint: 'Voit valita monta kerralla. Pidä sivu auki, kunnes lataus on valmis.',
     waiting: 'odottaa', uploading: 'ladataan', done: '✓ valmis', retry: 'yritä uudelleen',
     allDone: n => n === 1 ? '1 kuva ladattu — kiitos! 🎉' : `Kaikki ${n} kuvaa ladattu — kiitos! 🎉`,
@@ -134,7 +134,7 @@ const I18N = {
     failedCount: n => `, ${n} epäonnistui`,
     mine: n => n === 1 ? 'Olet jo jakanut 1 kuvan 💙' : `Olet jo jakanut ${n} kuvaa 💙`,
     errTooMany: 'liikaa latauksia juuri nyt — yritä myöhemmin',
-    errTooBig: 'tiedosto on liian suuri (max 50 MB)',
+    errTooBig: 'tiedosto on liian suuri',
     errFull: 'kokoelma on täynnä',
     errNotAllowed: c => `lataus estetty (${c})`,
     errUpload: c => `lataus epäonnistui (${c})`,
@@ -145,7 +145,7 @@ const I18N = {
     noKey: 'This page needs the personal link you were sent. Please open the exact link again.',
     nameLabel: 'Your name',
     namePh: 'e.g. Maria K.',
-    pick: '📷 Choose photos',
+    pick: '📷 Choose photos & videos',
     hint: 'You can select many at once. Keep this page open until uploads finish.',
     waiting: 'waiting', uploading: 'uploading', done: '✓ done', retry: 'retry',
     allDone: n => n === 1 ? '1 photo uploaded — thank you! 🎉' : `All ${n} photos uploaded — thank you! 🎉`,
@@ -153,7 +153,7 @@ const I18N = {
     failedCount: n => `, ${n} failed`,
     mine: n => n === 1 ? "You've already shared 1 photo 💙" : `You've already shared ${n} photos 💙`,
     errTooMany: 'too many uploads right now — try later',
-    errTooBig: 'file too large (max 50 MB)',
+    errTooBig: 'file too large',
     errFull: 'the collection is full',
     errNotAllowed: c => `upload not allowed (${c})`,
     errUpload: c => `upload failed (${c})`,
@@ -300,6 +300,45 @@ async function makeThumb(file, previewImg) {
   }
 }
 
+// Grab a frame ~0.5s in as the video's thumbnail. Best-effort: on failure the
+// video still uploads, it just gets a placeholder tile in the gallery.
+function makeVideoThumb(file, previewImg) {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    const url = URL.createObjectURL(file);
+    let settled = false;
+    const done = (blob, dims) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      resolve({ blob, dims });
+    };
+    setTimeout(() => done(null, null), 10000);
+    video.onerror = () => done(null, null);
+    video.onloadeddata = () => {
+      try { video.currentTime = Math.min(0.5, video.duration || 0); } catch (e) { done(null, null); }
+    };
+    video.onseeked = () => {
+      try {
+        const dims = { w: video.videoWidth, h: video.videoHeight };
+        const scale = Math.min(1, 1000 / Math.max(dims.w, dims.h));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(dims.w * scale);
+        canvas.height = Math.round(dims.h * scale);
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(b => {
+          if (b && previewImg) previewImg.src = URL.createObjectURL(b);
+          done(b, dims);
+        }, 'image/jpeg', 0.8);
+      } catch (e) { done(null, null); }
+    };
+    video.src = url;
+  });
+}
+
 // WhatsApp (and most social apps) strip all EXIF, downscale to ≤1600px and
 // recompress hard. Filename is the strongest signal; the rest combined is a
 // good heuristic. PNGs (screenshots) are deliberately not flagged.
@@ -345,11 +384,12 @@ async function uploadOne(item) {
   setStatus(item, '<span class="spinner"></span> ' + t('uploading'));
   try {
     const { file } = item;
-    const contentType = file.type || 'image/jpeg';
+    const isVideo = (file.type || '').startsWith('video/') || /\.(mov|mp4|m4v|webm)$/i.test(file.name);
+    const contentType = file.type || (isVideo ? 'video/mp4' : 'image/jpeg');
 
     const [meta, thumb, signed] = await Promise.all([
-      readMeta(file),
-      makeThumb(file, item.li.querySelector('img')),
+      isVideo ? Promise.resolve({ tags: null, takenAt: file.lastModified ? new Date(file.lastModified).toISOString() : null }) : readMeta(file),
+      isVideo ? makeVideoThumb(file, item.li.querySelector('img')) : makeThumb(file, item.li.querySelector('img')),
       gate('sign', { name: item.uploader, fileName: file.name, size: file.size, contentType }),
     ]);
 
