@@ -14,6 +14,12 @@
   .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; align-items: center; }
   select, .btn { font-size: 0.9rem; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }
   .chk { font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
+  .btn.danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+  .tile.sel { outline: 3px solid #dc2626; outline-offset: -3px; }
+  .tile .selMark { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 50%;
+                   background: #dc2626; color: #fff; display: none; align-items: center; justify-content: center;
+                   font-size: 0.85rem; z-index: 2; }
+  .tile.sel .selMark { display: flex; }
   .count { color: var(--muted); font-size: 0.9rem; margin-left: auto; }
   .group-title { font-weight: 700; margin: 22px 0 10px; font-size: 1.05rem; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
@@ -91,6 +97,9 @@
     <button class="btn" id="shareBtn">📤 Share</button>
     <button class="btn" id="ssBtn">▶ Slideshow</button>
     <label class="chk"><input type="checkbox" id="hideWa"> hide 💬 re-shares</label>
+    <button class="btn" id="selBtn" hidden>🗑 Select</button>
+    <button class="btn" id="selCancel" hidden>Cancel</button>
+    <button class="btn danger" id="delBtn" hidden>Delete (0)</button>
     <span class="count" id="count"></span>
   </div>
   <div id="content"><p class="empty">Loading…</p></div>
@@ -186,13 +195,21 @@ function tile(p) {
   a.target = '_blank';
   a.title = `${p.uploader} — ${fmt(p.taken_at)} — ${p.original_name || ''}`;
   a.addEventListener('click', (e) => {
+    if (selectMode) {
+      e.preventDefault();
+      if (selected.has(p.id)) { selected.delete(p.id); a.classList.remove('sel'); }
+      else { selected.add(p.id); a.classList.add('sel'); }
+      updateDelBtn();
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.shiftKey) return; // keep open-in-new-tab working
     e.preventDefault();
     openModal(idx);
   });
-  a.innerHTML = p.thumb_path
+  a.innerHTML = (p.thumb_path
     ? `<img loading="lazy" src="${publicUrl(p.thumb_path)}" alt="">`
-    : `<div class="noThumb">${p.original_name || 'photo'}<br>(no preview)</div>`;
+    : `<div class="noThumb">${p.original_name || 'photo'}<br>(no preview)</div>`)
+    + '<span class="selMark">✓</span>';
   const meta = document.createElement('div');
   meta.className = 'meta';
   meta.textContent = `${p.suspected_reshare ? '💬 ' : ''}${p.uploader} · ${fmt(p.taken_at)}`;
@@ -202,6 +219,8 @@ function tile(p) {
 
 function render() {
   closeModal();
+  selected.clear();
+  updateDelBtn();
   viewList = [];
   const who = whoEl.value;
   let list = who ? photos.filter(p => p.uploader === who) : [...photos];
@@ -486,6 +505,62 @@ document.getElementById('waShare').addEventListener('click', () => {
 
 nativeShareBtn.addEventListener('click', () => {
   navigator.share({ text: shareMsgEl.value }).catch(() => {});
+});
+
+// --- admin: multi-select delete (requires the separate admin key) ---
+let adminStored = null;
+try { adminStored = localStorage.getItem('pc_admin'); } catch (e) { /* ignore */ }
+const ADMIN = new URLSearchParams(location.search).get('admin') || adminStored || '';
+if (new URLSearchParams(location.search).get('admin')) {
+  try { localStorage.setItem('pc_admin', ADMIN); } catch (e) { /* session-only */ }
+}
+
+const selBtn = document.getElementById('selBtn');
+const selCancel = document.getElementById('selCancel');
+const delBtn = document.getElementById('delBtn');
+let selectMode = false;
+const selected = new Set();
+if (ADMIN) selBtn.hidden = false;
+
+function updateDelBtn() {
+  delBtn.hidden = !selectMode || selected.size === 0;
+  delBtn.textContent = `Delete (${selected.size})`;
+}
+
+function setSelectMode(on) {
+  selectMode = on;
+  selected.clear();
+  selBtn.hidden = on || !ADMIN;
+  selCancel.hidden = !on;
+  document.querySelectorAll('.tile.sel').forEach(el => el.classList.remove('sel'));
+  updateDelBtn();
+}
+
+selBtn.addEventListener('click', () => setSelectMode(true));
+selCancel.addEventListener('click', () => setSelectMode(false));
+
+delBtn.addEventListener('click', async () => {
+  const n = selected.size;
+  if (!n) return;
+  if (!confirm(`Delete ${n} photo${n === 1 ? '' : 's'} permanently?\nThis cannot be undone.`)) return;
+  delBtn.disabled = true;
+  try {
+    const res = await fetch(`${CFG.gateUrl}/del`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ k: KEY, adminKey: ADMIN, ids: [...selected] }),
+    });
+    if (!res.ok) throw new Error(res.status === 403 ? 'Admin key not accepted.' : `Delete failed (${res.status}).`);
+    const { deleted } = await res.json();
+    photos = photos.filter(p => !selected.has(p.id));
+    setSelectMode(false);
+    render();
+    countEl.textContent += ` — ${deleted} deleted`;
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    delBtn.disabled = false;
+  }
 });
 
 sortEl.addEventListener('change', render);
