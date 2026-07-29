@@ -7,7 +7,7 @@ their name once. Static pages on GitHub Pages, backend on Supabase
 ## How it works
 
 - **`docs/index.html`** — the upload page (served at
-  `https://freducom.github.io/photo-collector/`). Asks for a name (remembered
+  `https://birkbilder.com/`). Asks for a name (remembered
   in localStorage), then lets people multi-select photos from their phone.
   Originals are uploaded untouched; a ~1000px JPEG thumbnail is generated in
   the browser for the gallery. Date taken is read from EXIF
