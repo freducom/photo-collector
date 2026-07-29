@@ -87,6 +87,18 @@ const CFG = window.PC_CONFIG;
 document.getElementById('title').textContent = CFG.eventTitle;
 document.title = CFG.eventTitle;
 
+// localStorage can throw in strict/private browsing modes — never let that
+// take the whole page down. (Defined first: everything below uses it.)
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* session-only */ } },
+};
+const genUuid = () => crypto.randomUUID ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+    });
+
 // --- i18n ---
 const I18N = {
   sv: {
@@ -169,18 +181,6 @@ document.querySelectorAll('.langs button').forEach(b => b.addEventListener('clic
   store.set('pc_lang', LANG);
   applyLang();
 }));
-
-// localStorage can throw in strict/private browsing modes — never let that
-// take the whole page down.
-const store = {
-  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* session-only */ } },
-};
-const genUuid = () => crypto.randomUUID ? crypto.randomUUID()
-  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-      const r = Math.random() * 16 | 0;
-      return (c === 'x' ? r : (r & 3 | 8)).toString(16);
-    });
 
 // The access key travels in the shared link and sticks in localStorage.
 const KEY = new URLSearchParams(location.search).get('k') || store.get('pc_key') || '';
