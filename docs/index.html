@@ -8,8 +8,12 @@
   :root { --accent: #2563eb; --bg: #f4f5f7; --card: #fff; --text: #1a1d21; --muted: #6b7280; }
   * { box-sizing: border-box; margin: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-  .wrap { max-width: 480px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 24px 16px 64px; position: relative; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; padding-right: 120px; }
+  .langs { position: absolute; top: 18px; right: 12px; display: flex; gap: 4px; }
+  .langs button { font-size: 1.25rem; line-height: 1; background: none; border: 2px solid transparent;
+                  border-radius: 8px; cursor: pointer; padding: 3px 4px; }
+  .langs button.active { border-color: var(--accent); background: #fff; }
   .sub { color: var(--muted); font-size: 0.95rem; margin-bottom: 24px; }
   .card { background: var(--card); border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
   label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
@@ -44,18 +48,23 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="langs">
+    <button data-lang="sv" aria-label="Svenska">🇸🇪</button>
+    <button data-lang="fi" aria-label="Suomi">🇫🇮</button>
+    <button data-lang="en" aria-label="English">🇬🇧</button>
+  </div>
   <h1 id="title">Photo Collection</h1>
-  <p class="sub">Share your best shots — originals are kept at full quality.</p>
+  <p class="sub" id="sub"></p>
 
-  <div class="warn" id="noKey" hidden>This page needs the personal link you were sent. Please open the exact link again.</div>
+  <div class="warn" id="noKey" hidden></div>
 
   <div class="card">
-    <label for="name">Your name</label>
-    <input type="text" id="name" placeholder="e.g. Maria K." autocomplete="name" maxlength="80">
+    <label for="name" id="nameLabel"></label>
+    <input type="text" id="name" autocomplete="name" maxlength="80">
     <input type="text" id="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <button class="pick" id="pickBtn">📷 Choose photos</button>
+    <button class="pick" id="pickBtn"></button>
     <input type="file" id="fileInput" accept="image/*,.heic,.heif" multiple>
-    <p class="hint">You can select many at once. Keep this page open until uploads finish.</p>
+    <p class="hint" id="hint"></p>
   </div>
 
   <div class="card" id="queueCard" hidden>
@@ -75,6 +84,89 @@
 const CFG = window.PC_CONFIG;
 document.getElementById('title').textContent = CFG.eventTitle;
 document.title = CFG.eventTitle;
+
+// --- i18n ---
+const I18N = {
+  sv: {
+    sub: 'Dela dina bästa bilder — originalen sparas i full kvalitet.',
+    noKey: 'Den här sidan behöver den personliga länk du fått. Öppna länken igen.',
+    nameLabel: 'Ditt namn',
+    namePh: 't.ex. Maria K.',
+    pick: '📷 Välj bilder',
+    hint: 'Du kan välja många på en gång. Håll sidan öppen tills uppladdningen är klar.',
+    waiting: 'väntar', uploading: 'laddar upp', done: '✓ klar', retry: 'försök igen',
+    allDone: n => n === 1 ? '1 bild uppladdad — tack! 🎉' : `Alla ${n} bilder uppladdade — tack! 🎉`,
+    progress: (d, tot) => `${d}/${tot} uppladdade`,
+    failedCount: n => `, ${n} misslyckades`,
+    mine: n => n === 1 ? 'Du har redan delat 1 bild 💙' : `Du har redan delat ${n} bilder 💙`,
+    errTooMany: 'för många uppladdningar just nu — försök senare',
+    errTooBig: 'filen är för stor (max 50 MB)',
+    errFull: 'samlingen är full',
+    errNotAllowed: c => `uppladdning nekad (${c})`,
+    errUpload: c => `uppladdningen misslyckades (${c})`,
+  },
+  fi: {
+    sub: 'Jaa parhaat kuvasi — alkuperäiset säilyvät täydessä laadussa.',
+    noKey: 'Tämä sivu tarvitsee saamasi henkilökohtaisen linkin. Avaa linkki uudelleen.',
+    nameLabel: 'Nimesi',
+    namePh: 'esim. Maria K.',
+    pick: '📷 Valitse kuvat',
+    hint: 'Voit valita monta kerralla. Pidä sivu auki, kunnes lataus on valmis.',
+    waiting: 'odottaa', uploading: 'ladataan', done: '✓ valmis', retry: 'yritä uudelleen',
+    allDone: n => n === 1 ? '1 kuva ladattu — kiitos! 🎉' : `Kaikki ${n} kuvaa ladattu — kiitos! 🎉`,
+    progress: (d, tot) => `${d}/${tot} ladattu`,
+    failedCount: n => `, ${n} epäonnistui`,
+    mine: n => n === 1 ? 'Olet jo jakanut 1 kuvan 💙' : `Olet jo jakanut ${n} kuvaa 💙`,
+    errTooMany: 'liikaa latauksia juuri nyt — yritä myöhemmin',
+    errTooBig: 'tiedosto on liian suuri (max 50 MB)',
+    errFull: 'kokoelma on täynnä',
+    errNotAllowed: c => `lataus estetty (${c})`,
+    errUpload: c => `lataus epäonnistui (${c})`,
+  },
+  en: {
+    sub: 'Share your best shots — originals are kept at full quality.',
+    noKey: 'This page needs the personal link you were sent. Please open the exact link again.',
+    nameLabel: 'Your name',
+    namePh: 'e.g. Maria K.',
+    pick: '📷 Choose photos',
+    hint: 'You can select many at once. Keep this page open until uploads finish.',
+    waiting: 'waiting', uploading: 'uploading', done: '✓ done', retry: 'retry',
+    allDone: n => n === 1 ? '1 photo uploaded — thank you! 🎉' : `All ${n} photos uploaded — thank you! 🎉`,
+    progress: (d, tot) => `${d}/${tot} uploaded`,
+    failedCount: n => `, ${n} failed`,
+    mine: n => n === 1 ? "You've already shared 1 photo 💙" : `You've already shared ${n} photos 💙`,
+    errTooMany: 'too many uploads right now — try later',
+    errTooBig: 'file too large (max 50 MB)',
+    errFull: 'the collection is full',
+    errNotAllowed: c => `upload not allowed (${c})`,
+    errUpload: c => `upload failed (${c})`,
+  },
+};
+let LANG = localStorage.getItem('pc_lang') || 'sv';
+if (!I18N[LANG]) LANG = 'sv';
+const t = (key, ...args) => {
+  const v = I18N[LANG][key];
+  return typeof v === 'function' ? v(...args) : v;
+};
+
+function applyLang() {
+  document.documentElement.lang = LANG;
+  document.querySelectorAll('.langs button').forEach(b => b.classList.toggle('active', b.dataset.lang === LANG));
+  document.getElementById('sub').textContent = t('sub');
+  document.getElementById('noKey').textContent = t('noKey');
+  document.getElementById('nameLabel').textContent = t('nameLabel');
+  document.getElementById('name').placeholder = t('namePh');
+  document.getElementById('pickBtn').textContent = t('pick');
+  document.getElementById('hint').textContent = t('hint');
+  updateSummary();
+  updateMineTitle();
+}
+
+document.querySelectorAll('.langs button').forEach(b => b.addEventListener('click', () => {
+  LANG = b.dataset.lang;
+  localStorage.setItem('pc_lang', LANG);
+  applyLang();
+}));
 
 // The access key travels in the shared link and sticks in localStorage.
 const KEY = new URLSearchParams(location.search).get('k') || localStorage.getItem('pc_key') || '';
@@ -126,10 +218,11 @@ const MAX_CONCURRENT = 3;
 function enqueue(file) {
   queueCard.hidden = false;
   const li = document.createElement('li');
-  li.innerHTML = `<img alt=""><span class="fname"></span><span class="status">waiting</span>`;
+  li.innerHTML = `<img alt=""><span class="fname"></span><span class="status"></span>`;
   li.querySelector('.fname').textContent = file.name;
   queueEl.prepend(li);
   const item = { file, li, uploader: nameEl.value.trim(), state: 'waiting' };
+  setStatus(item, t('waiting'));
   queue.push(item);
   pump();
 }
@@ -152,11 +245,12 @@ function pump() {
 }
 
 function updateSummary() {
+  if (!queue.length) { summaryEl.textContent = ''; return; }
   const done = queue.filter(i => i.state === 'done').length;
   const failed = queue.filter(i => i.state === 'error').length;
   summaryEl.textContent = done === queue.length
-    ? `All ${done} photo${done === 1 ? '' : 's'} uploaded — thank you! 🎉`
-    : `${done}/${queue.length} uploaded` + (failed ? `, ${failed} failed` : '');
+    ? t('allDone', done)
+    : t('progress', done, queue.length) + (failed ? t('failedCount', failed) : '');
 }
 
 async function extractTakenAt(file) {
@@ -192,10 +286,10 @@ async function gate(route, payload) {
     body: JSON.stringify({ k: KEY, honeypot: honeypotEl.value, ...payload }),
   });
   if (!res.ok) {
-    const msg = res.status === 429 ? 'too many uploads right now — try later'
-              : res.status === 413 ? 'file too large (max 50 MB)'
-              : res.status === 507 ? 'the collection is full'
-              : `upload not allowed (${res.status})`;
+    const msg = res.status === 429 ? t('errTooMany')
+              : res.status === 413 ? t('errTooBig')
+              : res.status === 507 ? t('errFull')
+              : t('errNotAllowed', res.status);
     throw new Error(msg);
   }
   return res.json();
@@ -207,11 +301,11 @@ async function putSigned(url, blob, contentType) {
     headers: { 'Content-Type': contentType || 'application/octet-stream' },
     body: blob,
   });
-  if (!res.ok) throw new Error(`upload failed (${res.status})`);
+  if (!res.ok) throw new Error(t('errUpload', res.status));
 }
 
 async function uploadOne(item) {
-  setStatus(item, '<span class="spinner"></span> uploading');
+  setStatus(item, '<span class="spinner"></span> ' + t('uploading'));
   try {
     const { file } = item;
     const contentType = file.type || 'image/jpeg';
@@ -242,15 +336,15 @@ async function uploadOne(item) {
     });
 
     item.state = 'done';
-    setStatus(item, '✓ done', 'done');
+    setStatus(item, t('done'), 'done');
     refreshMineSoon();
   } catch (e) {
     console.error(e);
     item.state = 'error';
-    setStatus(item, (e.message || 'failed') + ' ', 'error');
+    setStatus(item, (e.message || t('errUpload', '?')) + ' ', 'error');
     const retry = document.createElement('button');
     retry.className = 'retry';
-    retry.textContent = 'retry';
+    retry.textContent = t('retry');
     retry.onclick = () => { retry.remove(); item.state = 'waiting'; pump(); };
     item.li.querySelector('.status').appendChild(retry);
   }
@@ -262,6 +356,11 @@ const mineCard = document.getElementById('mineCard');
 const mineTitle = document.getElementById('mineTitle');
 const mineGrid = document.getElementById('mineGrid');
 
+let mineCount = 0;
+function updateMineTitle() {
+  if (!mineCard.hidden) mineTitle.textContent = t('mine', mineCount);
+}
+
 async function refreshMine() {
   if (!KEY) { mineCard.hidden = true; return; }
   try {
@@ -271,7 +370,8 @@ async function refreshMine() {
     if (!res.ok) return;
     const rows = await res.json();
     mineCard.hidden = rows.length === 0;
-    mineTitle.textContent = `You've already shared ${rows.length} photo${rows.length === 1 ? '' : 's'} 💙`;
+    mineCount = rows.length;
+    updateMineTitle();
     mineGrid.innerHTML = '';
     for (const p of rows) {
       const a = document.createElement('a');
@@ -292,6 +392,7 @@ async function refreshMine() {
 
 let mineTimer;
 function refreshMineSoon() { clearTimeout(mineTimer); mineTimer = setTimeout(refreshMine, 600); }
+applyLang();
 refreshMine();
 
 window.addEventListener('beforeunload', (e) => {

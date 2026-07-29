@@ -38,6 +38,27 @@
           color: #e5e7eb; font-size: 0.9rem; background: linear-gradient(transparent, rgba(0,0,0,.7)); }
   #mBar a { color: #93c5fd; }
   #mCount { position: absolute; top: 16px; left: 16px; color: #9ca3af; font-size: 0.85rem; }
+  /* share dialog */
+  #share { position: fixed; inset: 0; background: rgba(10,10,12,.55); z-index: 60;
+           display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #share[hidden] { display: none; }
+  .shareCard { background: #fff; border-radius: 16px; padding: 22px; max-width: 420px; width: 100%;
+               max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 50px rgba(0,0,0,.35); position: relative; }
+  .shareCard h2 { font-size: 1.1rem; margin-bottom: 12px; }
+  #shareQr { display: flex; justify-content: center; margin: 10px 0; }
+  #shareQr svg { width: 220px; height: 220px; }
+  .shareUrl { display: flex; gap: 8px; margin: 10px 0; }
+  .shareUrl input { flex: 1; font-size: 0.9rem; padding: 10px; border: 1.5px solid #d1d5db; border-radius: 8px; }
+  .shareMsg { width: 100%; font-size: 0.9rem; padding: 10px; border: 1.5px solid #d1d5db; border-radius: 8px;
+              font-family: inherit; resize: vertical; min-height: 88px; margin: 6px 0 10px; }
+  .shareRow { display: flex; gap: 8px; flex-wrap: wrap; }
+  .shareBtn { flex: 1; padding: 12px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600;
+              cursor: pointer; background: var(--accent); color: #fff; white-space: nowrap; }
+  .shareBtn.wa { background: #25d366; }
+  .shareBtn.ghost { background: #eef2f7; color: var(--text); }
+  #shareClose { position: absolute; top: 10px; right: 12px; width: 36px; height: 36px; border: none;
+                border-radius: 50%; background: #eef2f7; font-size: 1rem; cursor: pointer; }
+  .shareHint { color: var(--muted); font-size: 0.82rem; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -51,9 +72,30 @@
       <option value="uploader">Group by uploader</option>
     </select>
     <select id="who"><option value="">Everyone</option></select>
+    <!-- hidden for now, fully functional — remove `hidden` to expose -->
+    <button class="btn" id="dlAll" hidden>⬇ Download all</button>
+    <button class="btn" id="shareBtn">📤 Share</button>
     <span class="count" id="count"></span>
   </div>
   <div id="content"><p class="empty">Loading…</p></div>
+</div>
+
+<div id="share" hidden>
+  <div class="shareCard">
+    <button id="shareClose" aria-label="Close">✕</button>
+    <h2>Invite people to share photos</h2>
+    <div id="shareQr"></div>
+    <div class="shareUrl">
+      <input id="shareUrlInput" readonly>
+      <button class="shareBtn ghost" id="copyUrl" style="flex:0">Copy</button>
+    </div>
+    <textarea class="shareMsg" id="shareMsg"></textarea>
+    <div class="shareRow">
+      <button class="shareBtn wa" id="waShare">Share on WhatsApp</button>
+      <button class="shareBtn" id="nativeShare" hidden>Share…</button>
+    </div>
+    <p class="shareHint">The QR code and link include the access key — anyone who gets them can upload and view. Share within the group only.</p>
+  </div>
 </div>
 
 <div id="modal" hidden>
@@ -66,6 +108,7 @@
 </div>
 
 <script src="./config.js"></script>
+<script src="./qrcode.js"></script>
 <script>
 const CFG = window.PC_CONFIG;
 document.getElementById('title').textContent = CFG.eventTitle + ' — Gallery';
@@ -256,6 +299,101 @@ modal.addEventListener('touchend', (e) => {
   touchX = touchY = null;
   if (Math.abs(dx) > 40 && Math.abs(dy) < 80) step(dx < 0 ? 1 : -1);
 }, { passive: true });
+
+// --- download all (respects the active filter) ---
+const dlBtn = document.getElementById('dlAll');
+dlBtn.addEventListener('click', downloadAll);
+
+async function downloadAll() {
+  const list = [...viewList];
+  if (!list.length) { alert('No photos to download.'); return; }
+  dlBtn.disabled = true;
+  const origLabel = dlBtn.textContent;
+  try {
+    const { downloadZip } = await import('./client-zip.js');
+    const safe = s => (s || 'unknown').replace(/[^\w. -]/g, '_').trim() || 'unknown';
+    const seen = new Map();
+    let n = 0;
+
+    async function* files() {
+      for (const p of list) {
+        dlBtn.textContent = `⬇ ${++n}/${list.length}…`;
+        const res = await fetch(publicUrl(p.storage_path));
+        if (!res.ok) continue;
+        const stamp = p.taken_at ? p.taken_at.slice(0, 19).replace(/:/g, '-').replace('T', '_') : 'no-date';
+        let name = `${safe(p.uploader)}/${stamp}_${safe(p.original_name || p.storage_path.split('/').pop())}`;
+        const dup = seen.get(name) || 0;
+        seen.set(name, dup + 1);
+        if (dup) name = name.replace(/(\.[^./]*)?$/, `_${dup}$1`);
+        yield { name, input: res, lastModified: p.taken_at ? new Date(p.taken_at) : undefined };
+      }
+    }
+
+    const zip = downloadZip(files());
+    if (window.showSaveFilePicker) {
+      // Chrome/Edge: stream straight to disk — no size limit worth worrying about.
+      const handle = await showSaveFilePicker({
+        suggestedName: 'bilder-av-birk.zip',
+        types: [{ description: 'Zip archive', accept: { 'application/zip': ['.zip'] } }],
+      });
+      await zip.body.pipeTo(await handle.createWritable());
+    } else {
+      // Safari/Firefox: buffer in memory, fine up to ~1 GB.
+      const blob = await zip.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'bilder-av-birk.zip';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    }
+    dlBtn.textContent = '✓ done';
+    setTimeout(() => { dlBtn.textContent = origLabel; }, 3000);
+  } catch (e) {
+    if (e.name !== 'AbortError') { console.error(e); alert('Download failed: ' + e.message); }
+    dlBtn.textContent = origLabel;
+  } finally {
+    dlBtn.disabled = false;
+  }
+}
+
+// --- share dialog ---
+const shareEl = document.getElementById('share');
+const shareMsgEl = document.getElementById('shareMsg');
+const shareUrlInput = document.getElementById('shareUrlInput');
+const nativeShareBtn = document.getElementById('nativeShare');
+
+function shareLink() {
+  return `${location.origin}${location.pathname.replace(/gallery\.html$/, '')}?k=${encodeURIComponent(KEY)}`;
+}
+
+document.getElementById('shareBtn').addEventListener('click', () => {
+  const url = shareLink();
+  shareUrlInput.value = url;
+  shareMsgEl.value = `Hi! We're collecting photos of Birk. Please share your best ones here (no login, takes a minute):\n\n${url}\n\nEnter your name, pick the photos, done — they're kept in full quality.`;
+  const qr = qrcode(0, 'M');
+  qr.addData(url);
+  qr.make();
+  document.getElementById('shareQr').innerHTML = qr.createSvgTag({ cellSize: 5, margin: 8, scalable: true });
+  nativeShareBtn.hidden = !navigator.share;
+  shareEl.hidden = false;
+});
+
+document.getElementById('shareClose').addEventListener('click', () => { shareEl.hidden = true; });
+shareEl.addEventListener('click', (e) => { if (e.target === shareEl) shareEl.hidden = true; });
+
+document.getElementById('copyUrl').addEventListener('click', async (e) => {
+  await navigator.clipboard.writeText(shareUrlInput.value);
+  e.target.textContent = '✓';
+  setTimeout(() => { e.target.textContent = 'Copy'; }, 1500);
+});
+
+document.getElementById('waShare').addEventListener('click', () => {
+  window.open(`https://wa.me/?text=${encodeURIComponent(shareMsgEl.value)}`, '_blank');
+});
+
+nativeShareBtn.addEventListener('click', () => {
+  navigator.share({ text: shareMsgEl.value }).catch(() => {});
+});
 
 sortEl.addEventListener('change', render);
 whoEl.addEventListener('change', render);
