@@ -21,6 +21,23 @@
   .meta { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 8px 6px; font-size: 0.72rem; color: #fff;
           background: linear-gradient(transparent, rgba(0,0,0,.65)); }
   .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+  /* lightbox */
+  #modal { position: fixed; inset: 0; background: rgba(10,10,12,.93); z-index: 50;
+           display: flex; align-items: center; justify-content: center; }
+  #modal[hidden] { display: none; }
+  #modalImg { max-width: 94vw; max-height: 82vh; object-fit: contain; border-radius: 6px;
+              box-shadow: 0 8px 40px rgba(0,0,0,.6); user-select: none; }
+  .mBtn { position: absolute; top: 50%; transform: translateY(-50%); width: 54px; height: 84px;
+          border: none; border-radius: 12px; background: rgba(255,255,255,.09); color: #fff;
+          font-size: 2rem; cursor: pointer; }
+  .mBtn:hover { background: rgba(255,255,255,.2); }
+  #mPrev { left: 8px; } #mNext { right: 8px; }
+  #mClose { position: absolute; top: 10px; right: 12px; width: 44px; height: 44px; border: none;
+            border-radius: 50%; background: rgba(255,255,255,.12); color: #fff; font-size: 1.3rem; cursor: pointer; }
+  #mBar { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 16px; text-align: center;
+          color: #e5e7eb; font-size: 0.9rem; background: linear-gradient(transparent, rgba(0,0,0,.7)); }
+  #mBar a { color: #93c5fd; }
+  #mCount { position: absolute; top: 16px; left: 16px; color: #9ca3af; font-size: 0.85rem; }
 </style>
 </head>
 <body>
@@ -37,6 +54,15 @@
     <span class="count" id="count"></span>
   </div>
   <div id="content"><p class="empty">Loading…</p></div>
+</div>
+
+<div id="modal" hidden>
+  <span id="mCount"></span>
+  <img id="modalImg" alt="">
+  <button class="mBtn" id="mPrev" aria-label="Previous">‹</button>
+  <button class="mBtn" id="mNext" aria-label="Next">›</button>
+  <button id="mClose" aria-label="Close">✕</button>
+  <div id="mBar"><span id="mCap"></span> · <a id="mOrig" target="_blank" rel="noopener">full quality ↗</a></div>
 </div>
 
 <script src="./config.js"></script>
@@ -77,12 +103,23 @@ async function load() {
 const fmt = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'unknown date';
 const fmtDay = iso => iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: 'full' }) : 'Unknown date';
 
+// Tiles are created in display order, so viewList mirrors exactly what the
+// user sees under the active filter + sort — the modal browses that order.
+let viewList = [];
+
 function tile(p) {
+  const idx = viewList.length;
+  viewList.push(p);
   const a = document.createElement('a');
   a.className = 'tile';
   a.href = publicUrl(p.storage_path);
   a.target = '_blank';
   a.title = `${p.uploader} — ${fmt(p.taken_at)} — ${p.original_name || ''}`;
+  a.addEventListener('click', (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey) return; // keep open-in-new-tab working
+    e.preventDefault();
+    openModal(idx);
+  });
   a.innerHTML = p.thumb_path
     ? `<img loading="lazy" src="${publicUrl(p.thumb_path)}" alt="">`
     : `<div class="noThumb">${p.original_name || 'photo'}<br>(no preview)</div>`;
@@ -94,6 +131,8 @@ function tile(p) {
 }
 
 function render() {
+  closeModal();
+  viewList = [];
   const who = whoEl.value;
   let list = who ? photos.filter(p => p.uploader === who) : [...photos];
   countEl.textContent = `${list.length} photo${list.length === 1 ? '' : 's'}`;
@@ -152,6 +191,71 @@ function render() {
     contentEl.appendChild(grid);
   }
 }
+
+// --- lightbox ---
+const modal = document.getElementById('modal');
+const modalImg = document.getElementById('modalImg');
+const mCap = document.getElementById('mCap');
+const mOrig = document.getElementById('mOrig');
+const mCount = document.getElementById('mCount');
+let modalIdx = -1;
+
+function openModal(i) {
+  modalIdx = i;
+  modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  showCurrent();
+}
+
+function closeModal() {
+  if (modal.hidden) return;
+  modal.hidden = true;
+  document.body.style.overflow = '';
+  modalImg.src = '';
+}
+
+function showCurrent() {
+  const p = viewList[modalIdx];
+  if (!p) return;
+  modalImg.src = publicUrl(p.thumb_path || p.storage_path);
+  mCap.textContent = `${p.uploader} · ${fmt(p.taken_at)}`;
+  mOrig.href = publicUrl(p.storage_path);
+  mCount.textContent = `${modalIdx + 1} / ${viewList.length}`;
+  for (const d of [1, -1]) { // preload neighbours for instant stepping
+    const n = viewList[(modalIdx + d + viewList.length) % viewList.length];
+    if (n?.thumb_path) new Image().src = publicUrl(n.thumb_path);
+  }
+}
+
+function step(d) {
+  modalIdx = (modalIdx + d + viewList.length) % viewList.length;
+  showCurrent();
+}
+
+document.getElementById('mPrev').addEventListener('click', () => step(-1));
+document.getElementById('mNext').addEventListener('click', () => step(1));
+document.getElementById('mClose').addEventListener('click', closeModal);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+document.addEventListener('keydown', (e) => {
+  if (modal.hidden) return;
+  if (e.key === 'ArrowRight') step(1);
+  else if (e.key === 'ArrowLeft') step(-1);
+  else if (e.key === 'Escape') closeModal();
+});
+
+let touchX = null, touchY = null;
+modal.addEventListener('touchstart', (e) => {
+  touchX = e.touches[0].clientX;
+  touchY = e.touches[0].clientY;
+}, { passive: true });
+modal.addEventListener('touchend', (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  const dy = e.changedTouches[0].clientY - touchY;
+  touchX = touchY = null;
+  if (Math.abs(dx) > 40 && Math.abs(dy) < 80) step(dx < 0 ? 1 : -1);
+}, { passive: true });
 
 sortEl.addEventListener('change', render);
 whoEl.addEventListener('change', render);
