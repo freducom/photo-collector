@@ -369,7 +369,7 @@ function shareLink() {
 document.getElementById('shareBtn').addEventListener('click', () => {
   const url = shareLink();
   shareUrlInput.value = url;
-  shareMsgEl.value = `Hi! We're collecting photos of Birk. Please share your best ones here (no login, takes a minute):\n\n${url}\n\nEnter your name, pick the photos, done — they're kept in full quality.`;
+  shareMsgEl.value = `Hej! Vi samlar bilder på Birk. Dela gärna dina bästa bilder här (ingen inloggning, tar bara en minut):\n\n${url}\n\nSkriv ditt namn, välj bilderna, klart — de sparas i full kvalitet.`;
   const qr = qrcode(0, 'M');
   qr.addData(url);
   qr.make();
