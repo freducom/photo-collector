@@ -15,7 +15,9 @@
   .langs button { font-size: 1.25rem; line-height: 1; background: none; border: 2px solid transparent;
                   border-radius: 8px; cursor: pointer; padding: 3px 4px; }
   .langs button.active { border-color: var(--accent); background: #fff; }
-  .sub { color: var(--muted); font-size: 0.95rem; margin-bottom: 24px; }
+  h2 { font-size: 1.05rem; margin: 22px 0 8px; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin-bottom: 12px; }
+  .info { color: var(--text); font-size: 0.95rem; line-height: 1.5; }
   .card { background: var(--card); border-radius: 14px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
   label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
   input[type=text] { width: 100%; font-size: 1.1rem; padding: 12px; border: 1.5px solid #d1d5db; border-radius: 10px; }
@@ -56,9 +58,16 @@
   </div>
   <!-- Static Swedish defaults so the page is readable even if JS dies -->
   <h1 id="title">Bilder av Birk</h1>
-  <p class="sub" id="sub">Dela dina bästa bilder — originalen sparas i full kvalitet.</p>
 
   <div class="warn" id="noKey" hidden>Den här sidan behöver den personliga länk du fått. Öppna länken igen.</div>
+
+  <h2 id="infoTitle">Information om begravningen</h2>
+  <div class="card">
+    <p class="info" id="infoBody">Mer information om begravningen och praktiska detaljer delas här inom kort.</p>
+  </div>
+
+  <h2 id="uploadTitle">Ladda upp minnen</h2>
+  <p class="sub" id="sub">Dela dina bästa bilder — originalen sparas i full kvalitet.</p>
 
   <div class="card">
     <label for="name" id="nameLabel">Ditt namn</label>
@@ -119,6 +128,9 @@ const I18N = {
     errFull: 'samlingen är full',
     errNotAllowed: c => `uppladdning nekad (${c})`,
     errUpload: c => `uppladdningen misslyckades (${c})`,
+    infoTitle: 'Information om begravningen',
+    infoBody: 'Mer information om begravningen och praktiska detaljer delas här inom kort.',
+    uploadTitle: 'Ladda upp minnen',
     waWarn: 'Bilder märkta med 💬 verkar komma från WhatsApp eller sociala medier — originalkvalitet, datum och plats saknas. Ladda gärna upp originalen från kamerarullen om du har dem.',
   },
   fi: {
@@ -138,6 +150,9 @@ const I18N = {
     errFull: 'kokoelma on täynnä',
     errNotAllowed: c => `lataus estetty (${c})`,
     errUpload: c => `lataus epäonnistui (${c})`,
+    infoTitle: 'Tietoa hautajaisista',
+    infoBody: 'Lisätietoja hautajaisista ja käytännön järjestelyistä jaetaan täällä pian.',
+    uploadTitle: 'Lataa muistoja',
     waWarn: 'Merkillä 💬 merkityt kuvat näyttävät tulevan WhatsAppista tai somesta — alkuperäinen laatu, päiväys ja sijainti puuttuvat. Lataa alkuperäiset kuvarullasta, jos mahdollista.',
   },
   en: {
@@ -157,6 +172,9 @@ const I18N = {
     errFull: 'the collection is full',
     errNotAllowed: c => `upload not allowed (${c})`,
     errUpload: c => `upload failed (${c})`,
+    infoTitle: 'Information about the funeral',
+    infoBody: 'More information about the funeral and practical details will be shared here soon.',
+    uploadTitle: 'Upload memories',
     waWarn: 'Photos marked 💬 look like WhatsApp/social-media copies — original quality, date and location are missing. If you have the originals in your camera roll, please upload those.',
   },
 };
@@ -171,6 +189,9 @@ function applyLang() {
   document.documentElement.lang = LANG;
   document.querySelectorAll('.langs button').forEach(b => b.classList.toggle('active', b.dataset.lang === LANG));
   document.getElementById('sub').textContent = t('sub');
+  document.getElementById('infoTitle').textContent = t('infoTitle');
+  document.getElementById('infoBody').textContent = t('infoBody');
+  document.getElementById('uploadTitle').textContent = t('uploadTitle');
   document.getElementById('noKey').textContent = t('noKey');
   document.getElementById('nameLabel').textContent = t('nameLabel');
   document.getElementById('name').placeholder = t('namePh');
