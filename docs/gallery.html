@@ -45,6 +45,9 @@
   #mBar { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 16px; text-align: center;
           color: #e5e7eb; font-size: 0.9rem; background: linear-gradient(transparent, rgba(0,0,0,.7)); }
   #mBar a { color: #93c5fd; }
+  #mBar button { border: none; border-radius: 6px; padding: 4px 10px; font-size: 0.85rem; cursor: pointer;
+                 background: rgba(255,255,255,.15); color: #fff; margin-left: 6px; }
+  #mDate { border: none; border-radius: 6px; padding: 3px 6px; font-size: 0.85rem; margin-left: 6px; }
   #mCount { position: absolute; top: 16px; left: 16px; color: #9ca3af; font-size: 0.85rem; }
   /* slideshow */
   #slideshow { position: fixed; inset: 0; background: #000; z-index: 70; cursor: none; }
@@ -136,7 +139,7 @@
   <button class="mBtn" id="mPrev" aria-label="Previous">‹</button>
   <button class="mBtn" id="mNext" aria-label="Next">›</button>
   <button id="mClose" aria-label="Close">✕</button>
-  <div id="mBar"><span id="mCap"></span> · <a id="mOrig" target="_blank" rel="noopener">full quality ↗</a></div>
+  <div id="mBar"><span id="mCap"></span> · <a id="mOrig" target="_blank" rel="noopener">full quality ↗</a><button id="mEdit" hidden>✎ date</button><span id="mEditForm" hidden><input type="datetime-local" id="mDate"><button id="mSave">Save</button><button id="mEditCancel">✕</button></span></div>
 </div>
 
 <script src="./config.js"></script>
@@ -309,6 +312,10 @@ function closeModal() {
   modalVid.pause();
   modalVid.removeAttribute('src');
   modalVid.load();
+  if (datesChanged) { // re-sort/regroup with the corrected dates
+    datesChanged = false;
+    render();
+  }
 }
 
 function showCurrent() {
@@ -330,6 +337,8 @@ function showCurrent() {
   mCap.textContent = `${video ? '🎬 ' : ''}${p.uploader} · ${fmt(p.taken_at)}`;
   mOrig.href = publicUrl(p.storage_path);
   mCount.textContent = `${modalIdx + 1} / ${viewList.length}`;
+  mEdit.hidden = !ADMIN;
+  mEditForm.hidden = true;
   for (const d of [1, -1]) { // preload neighbours for instant stepping
     const n = viewList[(modalIdx + d + viewList.length) % viewList.length];
     if (n?.thumb_path) new Image().src = publicUrl(n.thumb_path);
@@ -348,9 +357,52 @@ modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); }
 
 document.addEventListener('keydown', (e) => {
   if (modal.hidden) return;
+  if (e.target.tagName === 'INPUT') return; // typing in the date editor
   if (e.key === 'ArrowRight') step(1);
   else if (e.key === 'ArrowLeft') step(-1);
   else if (e.key === 'Escape') closeModal();
+});
+
+// --- admin: correct a photo's date (lightbox) ---
+const mEdit = document.getElementById('mEdit');
+const mEditForm = document.getElementById('mEditForm');
+const mDate = document.getElementById('mDate');
+let datesChanged = false;
+
+mEdit.addEventListener('click', () => {
+  const p = viewList[modalIdx];
+  if (!p) return;
+  const d = p.taken_at ? new Date(p.taken_at) : new Date();
+  mDate.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  mEdit.hidden = true;
+  mEditForm.hidden = false;
+});
+
+document.getElementById('mEditCancel').addEventListener('click', () => {
+  mEditForm.hidden = true;
+  mEdit.hidden = !ADMIN;
+});
+
+document.getElementById('mSave').addEventListener('click', async (e) => {
+  const p = viewList[modalIdx];
+  if (!p || !mDate.value) return;
+  const iso = new Date(mDate.value).toISOString();
+  e.target.disabled = true;
+  try {
+    const res = await fetch(`${CFG.gateUrl}/edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ k: KEY, adminKey: ADMIN, id: p.id, takenAt: iso }),
+    });
+    if (!res.ok) throw new Error(res.status === 403 ? 'Admin key not accepted.' : `Save failed (${res.status}).`);
+    p.taken_at = iso;
+    datesChanged = true;
+    showCurrent();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    e.target.disabled = false;
+  }
 });
 
 let touchX = null, touchY = null;
