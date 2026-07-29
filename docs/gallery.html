@@ -492,9 +492,9 @@ function ssShow(i) {
     back.classList.add('on');
     ssImgs[ssFront].classList.remove('on');
     ssFront = 1 - ssFront;
-    ssCap.textContent = `${p.uploader} · ${fmt(p.taken_at)}`;
+    ssCap.textContent = fmt(p.taken_at);
   };
-  pre.onerror = () => { ssCap.textContent = `${p.uploader} · ${fmt(p.taken_at)} (no preview)`; };
+  pre.onerror = () => { ssCap.textContent = `${fmt(p.taken_at)} (no preview)`; };
   pre.src = url;
 }
 
