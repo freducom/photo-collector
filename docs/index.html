@@ -33,6 +33,10 @@
   .status.error { color: #dc2626; font-weight: 600; }
   .retry { color: var(--accent); background: none; border: none; font-size: 0.82rem; cursor: pointer; padding: 0; text-decoration: underline; }
   #summary { text-align: center; font-weight: 600; margin-top: 8px; }
+  .mineGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; margin-top: 10px; }
+  .mineGrid a { display: block; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: #e5e7eb;
+                text-align: center; line-height: 72px; text-decoration: none; }
+  .mineGrid img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #d1d5db; border-top-color: var(--accent);
              border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -58,6 +62,11 @@
     <ul id="queue"></ul>
     <p id="summary"></p>
   </div>
+
+  <div class="card" id="mineCard" hidden>
+    <label id="mineTitle">Your photos</label>
+    <div class="mineGrid" id="mineGrid"></div>
+  </div>
 </div>
 
 <script src="./exifr.umd.js"></script>
@@ -73,7 +82,7 @@ if (new URLSearchParams(location.search).get('k')) localStorage.setItem('pc_key'
 
 const nameEl = document.getElementById('name');
 nameEl.value = localStorage.getItem('pc_name') || '';
-nameEl.addEventListener('input', () => localStorage.setItem('pc_name', nameEl.value.trim()));
+nameEl.addEventListener('input', () => { localStorage.setItem('pc_name', nameEl.value.trim()); refreshMineSoon(); });
 
 const pickBtn = document.getElementById('pickBtn');
 const fileInput = document.getElementById('fileInput');
@@ -226,6 +235,7 @@ async function uploadOne(item) {
 
     item.state = 'done';
     setStatus(item, '✓ done', 'done');
+    refreshMineSoon();
   } catch (e) {
     console.error(e);
     item.state = 'error';
@@ -237,6 +247,45 @@ async function uploadOne(item) {
     item.li.querySelector('.status').appendChild(retry);
   }
 }
+
+// "You've already shared N photos" — looked up by the saved name, so it
+// survives reopening the page on the same device.
+const mineCard = document.getElementById('mineCard');
+const mineTitle = document.getElementById('mineTitle');
+const mineGrid = document.getElementById('mineGrid');
+
+async function refreshMine() {
+  const name = nameEl.value.trim();
+  if (!KEY || !name) { mineCard.hidden = true; return; }
+  try {
+    const res = await fetch(
+      `${CFG.supabaseUrl}/rest/v1/photos?select=storage_path,thumb_path&uploader=eq.${encodeURIComponent(name)}&order=uploaded_at.desc&limit=500`,
+      { headers: { apikey: CFG.anonKey, Authorization: `Bearer ${CFG.anonKey}`, 'x-collect-key': KEY } });
+    if (!res.ok) return;
+    const rows = await res.json();
+    mineCard.hidden = rows.length === 0;
+    mineTitle.textContent = `You've already shared ${rows.length} photo${rows.length === 1 ? '' : 's'} 💙`;
+    mineGrid.innerHTML = '';
+    for (const p of rows) {
+      const a = document.createElement('a');
+      a.href = `${CFG.supabaseUrl}/storage/v1/object/public/photos/${p.storage_path}`;
+      a.target = '_blank';
+      if (p.thumb_path) {
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = `${CFG.supabaseUrl}/storage/v1/object/public/photos/${p.thumb_path}`;
+        a.appendChild(img);
+      } else {
+        a.textContent = '📷';
+      }
+      mineGrid.appendChild(a);
+    }
+  } catch (e) { /* offline etc. — the section just stays as-is */ }
+}
+
+let mineTimer;
+function refreshMineSoon() { clearTimeout(mineTimer); mineTimer = setTimeout(refreshMine, 600); }
+refreshMine();
 
 window.addEventListener('beforeunload', (e) => {
   if (queue.some(i => i.state === 'waiting' || i.state === 'uploading')) e.preventDefault();
